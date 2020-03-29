@@ -1,0 +1,21 @@
+version: '2'
+
+services:
+  postgres:
+    image: postgres:12
+    container_name: auth_postgres_test
+    environment:
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_USER=auth
+      - POSTGRES_DB=auth
+    ports:
+    - "5432:5432"
+
+#  mysql:
+#    image: mysql:8
+#    container_name: auth_mysql_test
+#    environment:
+#    - MYSQL_ROOT_PASSWORD=password
+#    - MYSQL_DATABASE=autowp
+#    ports:
+#    - "3306:3306"

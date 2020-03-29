@@ -1,0 +1,37 @@
+sudo: required
+
+language: go
+
+services:
+  - docker
+
+go:
+  - "1.14"
+
+addons:
+  sonarcloud:
+    organization: "autowp-github"
+    token:
+      secure: $SONARCLOUD_TOKEN
+
+install: true
+
+before_script:
+  - go mod verify
+  - go mod download
+
+  - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.24.0
+
+script:
+  - golangci-lint run ./... || travis_terminate 1;
+
+  - sonar-scanner -Dsonar.login=$SONARCLOUD_TOKEN || true;
+
+  - docker build . -t autowp/auth || travis_terminate 1;
+
+after_success:
+  - if [ "$TRAVIS_BRANCH" == "master" ]; then
+    docker login -u="$DOCKER_USERNAME" -p="$DOCKER_PASSWORD";
+    docker push autowp/auth;
+    fi
+
