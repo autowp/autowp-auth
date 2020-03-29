@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -148,7 +149,10 @@ func initOAuthServer(db *sql.DB, userStore *UserStore, config OAuthConfig) *serv
 	// client store
 	clientStore := store.NewClientStore()
 	for _, client := range config.Clients {
-		clientStore.Set(client.ID, &client)
+		err := clientStore.Set(client.ID, &client)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	manager.MapClientStorage(clientStore)
@@ -206,7 +210,10 @@ func (s *Service) setupRouter() {
 
 			c.Request.URL.RawQuery = values.Encode()
 
-			s.oauthServer.HandleTokenRequest(c.Writer, c.Request)
+			err := s.oauthServer.HandleTokenRequest(c.Writer, c.Request)
+			if err != nil {
+				c.String(http.StatusInternalServerError, err.Error())
+			}
 		})
 	}
 
@@ -263,7 +270,7 @@ func applyMigrations(config MigrationsConfig) error {
 // Close Destructor
 func (s *Service) Close() {
 	if s.httpServer != nil {
-		err := s.httpServer.Shutdown(nil)
+		err := s.httpServer.Shutdown(context.TODO())
 		if err != nil {
 			panic(err) // failure/timeout shutting down the server gracefully
 		}
