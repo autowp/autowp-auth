@@ -40,6 +40,7 @@ import (
 	"golang.org/x/oauth2/vk"
 
 	goauth2 "google.golang.org/api/oauth2/v2"
+	"google.golang.org/api/option"
 
 	_ "github.com/go-sql-driver/mysql" // enable mysql driver
 	_ "github.com/jackc/pgx/v4/stdlib" // postgresql driver
@@ -141,7 +142,7 @@ func NewService(wg *sync.WaitGroup, config Config) (*Service, error) {
 
 			httpClient := config.Client(context.Background(), token)
 
-			goauth2Service, err := goauth2.New(httpClient)
+			goauth2Service, err := goauth2.NewService(context.Background(), option.WithHTTPClient(httpClient))
 			if err != nil {
 				return 0, "", err
 			}
