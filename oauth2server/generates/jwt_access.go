@@ -78,7 +78,11 @@ func (a *JWTAccessGenerate) Token(data *oauth2server.GenerateBasic, isGenRefresh
 	refresh := ""
 
 	if isGenRefresh {
-		refresh = base64.URLEncoding.EncodeToString(uuid.NewSHA1(uuid.Must(uuid.NewRandom()), []byte(access)).Bytes())
+		sha1, err := uuid.NewSHA1(uuid.Must(uuid.NewRandom()), []byte(access))
+		if err != nil {
+			return "", "", err
+		}
+		refresh = base64.URLEncoding.EncodeToString(sha1.Bytes())
 		refresh = strings.ToUpper(strings.TrimRight(refresh, "="))
 	}
 

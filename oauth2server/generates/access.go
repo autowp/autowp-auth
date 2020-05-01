@@ -25,11 +25,19 @@ func (ag *AccessGenerate) Token(data *oauth2server.GenerateBasic, isGenRefresh b
 	buf.WriteString(strconv.FormatInt(data.UserID, 10))
 	buf.WriteString(strconv.FormatInt(data.CreateAt.UnixNano(), 10))
 
-	access := base64.URLEncoding.EncodeToString(uuid.NewMD5(uuid.Must(uuid.NewRandom()), buf.Bytes()).Bytes())
+	md5, err := uuid.NewMD5(uuid.Must(uuid.NewRandom()), buf.Bytes())
+	if err != nil {
+		return "", "", err
+	}
+	access := base64.URLEncoding.EncodeToString(md5.Bytes())
 	access = strings.ToUpper(strings.TrimRight(access, "="))
 	refresh := ""
 	if isGenRefresh {
-		refresh = base64.URLEncoding.EncodeToString(uuid.NewSHA1(uuid.Must(uuid.NewRandom()), buf.Bytes()).Bytes())
+		sha1, err := uuid.NewSHA1(uuid.Must(uuid.NewRandom()), buf.Bytes())
+		if err != nil {
+			return "", "", err
+		}
+		refresh = base64.URLEncoding.EncodeToString(sha1.Bytes())
 		refresh = strings.ToUpper(strings.TrimRight(refresh, "="))
 	}
 

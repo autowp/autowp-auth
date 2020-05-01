@@ -27,7 +27,7 @@ type StateMap struct {
 
 // NewStateMap NewStateMap
 func NewStateMap(maxTTL time.Duration) (m *StateMap) {
-	m = &StateMap{m: make(map[string]*StateMapItem, 0)}
+	m = &StateMap{m: make(map[string]*StateMapItem)}
 	go func() {
 		for now := range time.Tick(time.Minute) {
 			m.l.Lock()

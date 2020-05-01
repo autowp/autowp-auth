@@ -53,13 +53,13 @@ type Server struct {
 }
 
 // TokenError ...
-func (s *Server) TokenError(c *gin.Context, err error) error {
+func (s *Server) TokenError(c *gin.Context, err error) {
 	data, statusCode, header := s.GetErrorData(err)
-	return s.Token(c, data, header, statusCode)
+	s.Token(c, data, header, statusCode)
 }
 
 // Token ...
-func (s *Server) Token(c *gin.Context, data map[string]interface{}, header http.Header, statusCode int) error {
+func (s *Server) Token(c *gin.Context, data map[string]interface{}, header http.Header, statusCode int) {
 	c.Header("Content-Type", "application/json;charset=UTF-8")
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
@@ -74,7 +74,6 @@ func (s *Server) Token(c *gin.Context, data map[string]interface{}, header http.
 	}
 
 	c.JSON(status, data)
-	return nil
 }
 
 // ValidationTokenRequest the token request validation

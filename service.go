@@ -369,11 +369,14 @@ func initOAuthServer(db *sql.DB, userStore *UserStore, config OAuthConfig) *serv
 	return srv
 }
 
-func randomBase64String(l int) string {
+func randomBase64String(l int) (string, error) {
 	buff := make([]byte, int(math.Round(float64(l)/float64(1.33333333333))))
-	rand.Read(buff)
+	_, err := rand.Read(buff)
+	if err != nil {
+		return "", err
+	}
 	str := base64.RawURLEncoding.EncodeToString(buff)
-	return str[:l] // strip 1 extra character we get from odd length results
+	return str[:l], nil // strip 1 extra character we get from odd length results
 }
 
 func (s *Service) getUserIDFromRequest(c *gin.Context) (int64, error) {
@@ -411,7 +414,10 @@ func (s *Service) getUserIDFromRequest(c *gin.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	decoder.Decode(token.Claims)
+	err = decoder.Decode(token.Claims)
+	if err != nil {
+		return 0, err
+	}
 
 	userID, err := strconv.ParseInt(claims.Subject, 10, 64)
 	if err != nil {
@@ -491,7 +497,12 @@ func (s *Service) setupRouter() {
 				return
 			}
 
-			stateID := randomBase64String(32)
+			stateID, err := randomBase64String(32)
+			if err != nil {
+				c.String(http.StatusInternalServerError, err.Error())
+				return
+			}
+
 			state := State{
 				UserID:      userID,
 				Language:    language,
