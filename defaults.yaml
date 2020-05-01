@@ -5,13 +5,6 @@ migrations:
   dir: ./migrations
 oauth:
   driver: pgx
-  token_type: Bearer
-  allowed_response_types:
-  - token
-  allowed_grant_types:
-  - password
-  - refresh_token
-  allowed_get_access_request: false
   user_store:
     driver: mysql
   clients:
@@ -20,3 +13,36 @@ oauth:
       domain: http://localhost
   access_token_expires_in: 120
   refresh_token_expires_in: 262800
+services:
+  redirect_uri: https://en.wheelsage.org/api/oauth/service-callback
+  google:
+    scopes:
+    - "https://www.googleapis.com/auth/userinfo.profile"
+  facebook:
+    scopes:
+    - "public_profile"
+  vk:
+    scopes:
+    - "status"
+hosts:
+  - language: en
+    hostname: en.wheelsage.org
+    timezone: Europe/London
+  - language: zh
+    hostname: zh.wheelsage.org
+    timezone: Asia/Shanghai
+  - language: ru
+    hostname: www.autowp.ru
+    timezone: Europe/Moscow
+  - language: pt-br
+    hostname: br.wheelsage.org
+    timezone: Brazil/West
+  - language: fr
+    hostname: fr.wheelsage.org
+    timezone: Europe/Paris
+  - language: be
+    hostname: be.wheelsage.org
+    timezone: Europe/Minsk
+  - language: uk
+    hostname: uk.wheelsage.org
+    timezone: Europe/Kiev

@@ -16,11 +16,13 @@ require (
 	github.com/golang/protobuf v1.3.5 // indirect
 	github.com/jackc/pgx/v4 v4.4.1
 	github.com/json-iterator/go v1.1.9
+	github.com/mitchellh/mapstructure v1.1.2
 	github.com/opencontainers/go-digest v1.0.0-rc1 // indirect
 	github.com/spf13/viper v1.3.2
 	github.com/stretchr/testify v1.5.1 // indirect
-	github.com/tidwall/buntdb v1.1.2 // indirect
+	github.com/tidwall/buntdb v1.1.2
 	github.com/tidwall/gjson v1.6.0 // indirect
 	github.com/tidwall/pretty v1.0.1 // indirect
-	gopkg.in/oauth2.v3 v3.12.0
+	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45
+	google.golang.org/api v0.22.0
 )

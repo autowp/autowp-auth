@@ -1,11 +1,22 @@
+listen: ":8083"
 sentry:
   dsn:
   environment: development
 migrations:
   dsn: postgres://auth:password@127.0.0.1/auth?sslmode=disable
 oauth:
-  dsn: auth:password@127.0.0.1:5432/auth?sslmode=disable
+  dsn: postgres://auth:password@127.0.0.1:5432/auth?sslmode=disable
   secret: example_secret
   user_store:
-    dsn: root:password@tcp(127.0.0.1:3306)/autowp?charset=utf8mb4&parseTime=true&loc=UTC
-    salt: asdasfasfas
+    dsn: root:password@tcp(127.0.0.1:3306)/autowp_test?charset=utf8mb4&parseTime=true&loc=UTC
+    salt: users-salt
+services:
+  google:
+    client_id: "client_id"
+    client_secret: "client_secret"
+  facebook:
+    client_id: "client_id"
+    client_secret: "client_secret"
+  vk:
+    client_id: "client_id"
+    client_secret: "client_secret"

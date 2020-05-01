@@ -21,7 +21,7 @@ type UserStore struct {
 
 // User User
 type User struct {
-	ID    int
+	ID    int64
 	Login *string
 	EMail *string
 	Name  string

@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/autowp/auth/oauth2server"
+	"github.com/autowp/auth/oauth2server/models"
 	jsoniter "github.com/json-iterator/go"
-	"gopkg.in/oauth2.v3"
-	"gopkg.in/oauth2.v3/models"
 )
 
 // TokenStore PostgreSQL token store
@@ -78,7 +78,7 @@ func (s *TokenStore) clean() {
 }
 
 // Create creates and stores the new token information
-func (s *TokenStore) Create(info oauth2.TokenInfo) error {
+func (s *TokenStore) Create(info oauth2server.TokenInfo) error {
 	buf, err := jsoniter.Marshal(info)
 	if err != nil {
 		return err
@@ -146,14 +146,14 @@ func (s *TokenStore) RemoveByRefresh(refresh string) error {
 	return err
 }
 
-func (s *TokenStore) toTokenInfo(data []byte) (oauth2.TokenInfo, error) {
+func (s *TokenStore) toTokenInfo(data []byte) (oauth2server.TokenInfo, error) {
 	var tm models.Token
 	err := jsoniter.Unmarshal(data, &tm)
 	return &tm, err
 }
 
 // GetByCode uses the authorization code for token information data
-func (s *TokenStore) GetByCode(code string) (oauth2.TokenInfo, error) {
+func (s *TokenStore) GetByCode(code string) (oauth2server.TokenInfo, error) {
 	if code == "" {
 		return nil, nil
 	}
@@ -173,7 +173,7 @@ func (s *TokenStore) GetByCode(code string) (oauth2.TokenInfo, error) {
 }
 
 // GetByAccess uses the access token for token information data
-func (s *TokenStore) GetByAccess(access string) (oauth2.TokenInfo, error) {
+func (s *TokenStore) GetByAccess(access string) (oauth2server.TokenInfo, error) {
 	if access == "" {
 		return nil, nil
 	}
@@ -193,7 +193,7 @@ func (s *TokenStore) GetByAccess(access string) (oauth2.TokenInfo, error) {
 }
 
 // GetByRefresh uses the refresh token for token information data
-func (s *TokenStore) GetByRefresh(refresh string) (oauth2.TokenInfo, error) {
+func (s *TokenStore) GetByRefresh(refresh string) (oauth2server.TokenInfo, error) {
 	if refresh == "" {
 		return nil, nil
 	}

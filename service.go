@@ -2,25 +2,44 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/autowp/auth/oauth2server"
+	"github.com/autowp/auth/oauth2server/errors"
+
+	"github.com/autowp/auth/oauth2server/generates"
+
+	"github.com/autowp/auth/oauth2server/server"
+
+	"github.com/autowp/auth/oauth2server/store"
+
+	"github.com/autowp/auth/oauth2server/manage"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
-	"gopkg.in/oauth2.v3/errors"
-	"gopkg.in/oauth2.v3/generates"
-	"gopkg.in/oauth2.v3/manage"
-	"gopkg.in/oauth2.v3/server"
-	"gopkg.in/oauth2.v3/store"
+	"github.com/mitchellh/mapstructure"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/facebook"
+	"golang.org/x/oauth2/google"
+	"golang.org/x/oauth2/vk"
+
+	goauth2 "google.golang.org/api/oauth2/v2"
 
 	_ "github.com/go-sql-driver/mysql" // enable mysql driver
 	_ "github.com/jackc/pgx/v4/stdlib" // postgresql driver
@@ -41,6 +60,7 @@ type Service struct {
 	httpServer  *http.Server
 	router      *gin.Engine
 	logger      *log.Logger
+	stateMap    *StateMap
 }
 
 // NewService constructor
@@ -82,10 +102,178 @@ func NewService(wg *sync.WaitGroup, config Config) (*Service, error) {
 	s := &Service{
 		config:      config,
 		db:          db,
+		usersDB:     usersDB,
 		oauthServer: oauthServer,
 		Loc:         loc,
 		waitGroup:   wg,
+		stateMap:    NewStateMap(time.Hour),
 	}
+
+	oauthServer.SetSocialAuthorizationHandler(func(code, stateID, remoteAddr string) (int64, string, error) {
+
+		if stateID == "" {
+			return 0, "", errors.ErrInvalidRequest
+		}
+
+		state := s.stateMap.Get(stateID)
+		if state == nil {
+			return 0, "", errors.ErrInvalidRequest
+		}
+
+		var userID int64
+
+		userInfo := UserInfo{}
+
+		switch state.Service {
+		case Google:
+
+			var config = &oauth2.Config{
+				ClientID:     s.config.Services.Google.ClientID,
+				ClientSecret: s.config.Services.Google.ClientSecret,
+				Endpoint:     google.Endpoint,
+				Scopes:       s.config.Services.Google.Scopes,
+				RedirectURL:  s.config.Services.RedirectURI,
+			}
+			token, err := config.Exchange(context.Background(), code)
+			if err != nil {
+				return 0, "", err
+			}
+
+			httpClient := config.Client(context.Background(), token)
+
+			goauth2Service, err := goauth2.New(httpClient)
+			if err != nil {
+				return 0, "", err
+			}
+
+			gUserInfo, err := goauth2Service.Userinfo.V2.Me.Get().Do()
+			if err != nil {
+				return 0, "", err
+			}
+
+			userInfo.ID = gUserInfo.Id
+			userInfo.Name = gUserInfo.Name
+			userInfo.URL = gUserInfo.Link
+
+		case Facebook:
+			var config = &oauth2.Config{
+				ClientID:     s.config.Services.Facebook.ClientID,
+				ClientSecret: s.config.Services.Facebook.ClientSecret,
+				Endpoint:     facebook.Endpoint,
+				Scopes:       s.config.Services.Facebook.Scopes,
+				RedirectURL:  s.config.Services.RedirectURI,
+			}
+			token, err := config.Exchange(context.Background(), code)
+			if err != nil {
+				return 0, "", err
+			}
+
+			httpClient := config.Client(context.Background(), token)
+
+			resp, err := httpClient.Get("https://graph.facebook.com/v6.0/me?fields=id,name")
+			if err != nil {
+				return 0, "", err
+			}
+
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				return 0, "", fmt.Errorf("Unexpected status code %d", resp.StatusCode)
+			}
+
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				return 0, "", err
+			}
+
+			fbUser := FacebookUser{}
+			err = json.Unmarshal(body, &fbUser)
+			if err != nil {
+				return 0, "", err
+			}
+
+			userInfo.ID = fbUser.ID
+			userInfo.Name = fbUser.Name
+			userInfo.URL = ""
+
+		case VK:
+			var config = &oauth2.Config{
+				ClientID:     s.config.Services.VK.ClientID,
+				ClientSecret: s.config.Services.VK.ClientSecret,
+				Endpoint:     vk.Endpoint,
+				Scopes:       s.config.Services.VK.Scopes,
+				RedirectURL:  s.config.Services.RedirectURI,
+			}
+			token, err := config.Exchange(context.Background(), code)
+			if err != nil {
+				return 0, "", err
+			}
+
+			url, err := url.Parse("https://api.vk.com/method/users.get")
+			if err != nil {
+				return 0, "", err
+			}
+
+			q := url.Query()
+			q.Set("fields", "id,first_name,last_name,screen_name")
+			q.Set("v", "5.103")
+			q.Set("lang", state.Language)
+			q.Set("access_token", token.AccessToken)
+			url.RawQuery = q.Encode()
+
+			resp, err := http.Get(url.String())
+			if err != nil {
+				return 0, "", err
+			}
+
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				return 0, "", fmt.Errorf("Unexpected status code %d", resp.StatusCode)
+			}
+
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				return 0, "", err
+			}
+
+			vkUsers := VKGetUsers{}
+			err = json.Unmarshal(body, &vkUsers)
+			if err != nil {
+				return 0, "", err
+			}
+
+			if len(vkUsers.Response) <= 0 {
+				return 0, "", fmt.Errorf("Empty response")
+			}
+
+			vkUser := vkUsers.Response[0]
+
+			userInfo.ID = strconv.FormatInt(vkUser.ID, 10)
+			userInfo.Name = strings.TrimSpace(vkUser.FirstName + " " + vkUser.LastName)
+			userInfo.URL = "http://vk.com/" + vkUser.ScreenName
+
+		default:
+			return 0, "", fmt.Errorf("Unexpected service %s", state.Service)
+		}
+
+		if userInfo.ID == "" {
+			return 0, "", fmt.Errorf("Failed to get user id")
+		}
+
+		if userInfo.Name == "" {
+			return 0, "", fmt.Errorf("Failed to get user name")
+		}
+
+		userID, err = s.registerUser(&userInfo, state, "Europe/Moscow", remoteAddr)
+		if err != nil {
+			return 0, "", err
+		}
+
+		s.stateMap.Delete(stateID)
+
+		return userID, state.RedirectURI, nil
+	})
 
 	s.setupRouter()
 
@@ -134,7 +322,6 @@ func initOAuthServer(db *sql.DB, userStore *UserStore, config OAuthConfig) *serv
 		IsGenerateRefresh: true,
 	})
 	// default implementation
-	//manager.MapAuthorizeGenerate(generates.NewAuthorizeGenerate())
 	manager.MapAccessGenerate(
 		&generates.JWTAccessGenerate{
 			SignedKey:    []byte(config.Secret),
@@ -157,23 +344,17 @@ func initOAuthServer(db *sql.DB, userStore *UserStore, config OAuthConfig) *serv
 
 	manager.MapClientStorage(clientStore)
 
-	srv := server.NewServer(&server.Config{
-		TokenType:            config.TokenType,
-		AllowedResponseTypes: config.AllowedResponseTypes,
-		AllowedGrantTypes:    config.AllowedGrantTypes,
-	}, manager)
-	srv.SetAllowGetAccessRequest(true)
-	srv.SetClientInfoHandler(server.ClientFormHandler)
+	srv := server.NewServer(&server.Config{}, manager)
 
-	srv.SetPasswordAuthorizationHandler(func(username, password string) (userID string, err error) {
+	srv.SetPasswordAuthorizationHandler(func(username, password string) (userID int64, err error) {
 		user, err := userStore.GetUserByCredentials(username, password)
 		if err != nil {
-			return "", err
+			return 0, err
 		}
 		if user != nil {
-			return strconv.Itoa(user.ID), nil
+			return user.ID, nil
 		}
-		return "", nil
+		return 0, nil
 	})
 
 	srv.SetInternalErrorHandler(func(err error) (re *errors.Response) {
@@ -188,11 +369,63 @@ func initOAuthServer(db *sql.DB, userStore *UserStore, config OAuthConfig) *serv
 	return srv
 }
 
+func randomBase64String(l int) string {
+	buff := make([]byte, int(math.Round(float64(l)/float64(1.33333333333))))
+	rand.Read(buff)
+	str := base64.RawURLEncoding.EncodeToString(buff)
+	return str[:l] // strip 1 extra character we get from odd length results
+}
+
+func (s *Service) getUserIDFromRequest(c *gin.Context) (int64, error) {
+	authorizationHeader := c.GetHeader("Authorization")
+
+	if authorizationHeader == "" {
+		return 0, nil
+	}
+
+	bearerToken := strings.Split(authorizationHeader, " ")
+
+	if len(bearerToken) != 2 || bearerToken[0] != "Bearer" {
+		return 0, fmt.Errorf("Invalid authorization token")
+	}
+
+	token, err := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("There was an error")
+		}
+		return []byte(s.config.OAuth.Secret), nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	if !token.Valid {
+		return 0, fmt.Errorf("Invalid authorization token")
+	}
+
+	var claims jwt.StandardClaims
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		TagName: "json",
+		Result:  &claims,
+	})
+	if err != nil {
+		return 0, err
+	}
+	decoder.Decode(token.Claims)
+
+	userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return userID, nil
+}
+
 func (s *Service) setupRouter() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	apiGroup := r.Group("/oauth")
+	apiGroup := r.Group("/api/oauth")
 	{
 		/*apiGroup.GET("/authorize", func(c *gin.Context) {
 			err := s.oauthServer.HandleAuthorizeRequest(c.Writer, c.Request)
@@ -201,23 +434,226 @@ func (s *Service) setupRouter() {
 			}
 		})*/
 
-		apiGroup.GET("/token", func(c *gin.Context) {
+		apiGroup.POST("/token", func(c *gin.Context) {
 
-			values, _ := url.ParseQuery(c.Request.URL.RawQuery)
 			client := s.config.OAuth.Clients[0]
-			values.Set("client_id", client.GetID())
-			values.Set("client_secret", client.GetSecret())
 
-			c.Request.URL.RawQuery = values.Encode()
+			trd := oauth2server.TokenRequestData{}
 
-			err := s.oauthServer.HandleTokenRequest(c.Writer, c.Request)
+			err := c.ShouldBind(&trd)
+			if err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+			}
+
+			trd.ClientID = client.GetID()
+			trd.ClientSecret = client.GetSecret()
+
+			gt, tgr, _, err := s.oauthServer.ValidationTokenRequest(c, &trd)
+			if err != nil {
+				s.oauthServer.TokenError(c, err)
+				return
+			}
+
+			ti, err := s.oauthServer.GetAccessToken(gt, tgr)
+			if err != nil {
+				s.oauthServer.TokenError(c, err)
+				return
+			}
+
+			s.oauthServer.Token(c, s.oauthServer.GetTokenData(ti), nil, 0)
+		})
+
+		apiGroup.GET("/service", func(c *gin.Context) {
+
+			userID, err := s.getUserIDFromRequest(c)
+			if err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+				return
+			}
+
+			language := s.config.Hosts[0].Language
+			for _, host := range s.config.Hosts {
+				if host.Hostname == c.Request.Host {
+					language = host.Language
+				}
+			}
+
+			redirectURI := c.Query("redirect_uri")
+			if redirectURI == "" {
+				c.String(http.StatusBadRequest, "invalid redirect_uri")
+				return
+			}
+
+			serviceName := ExternalService(c.Query("service"))
+
+			if serviceName == "" {
+				c.String(http.StatusBadRequest, "unexpected service")
+				return
+			}
+
+			stateID := randomBase64String(32)
+			state := State{
+				UserID:      userID,
+				Language:    language,
+				Service:     serviceName,
+				RedirectURI: redirectURI,
+			}
+
+			s.stateMap.Put(stateID, state)
+
+			var config *oauth2.Config
+
+			switch serviceName {
+			case Google:
+				config = &oauth2.Config{
+					ClientID:     s.config.Services.Google.ClientID,
+					ClientSecret: s.config.Services.Google.ClientSecret,
+					Endpoint:     google.Endpoint,
+					Scopes:       s.config.Services.Google.Scopes,
+					RedirectURL:  s.config.Services.RedirectURI,
+				}
+			case Facebook:
+				config = &oauth2.Config{
+					ClientID:     s.config.Services.Facebook.ClientID,
+					ClientSecret: s.config.Services.Facebook.ClientSecret,
+					Endpoint:     facebook.Endpoint,
+					Scopes:       s.config.Services.Facebook.Scopes,
+					RedirectURL:  s.config.Services.RedirectURI,
+				}
+			case VK:
+				config = &oauth2.Config{
+					ClientID:     s.config.Services.VK.ClientID,
+					ClientSecret: s.config.Services.VK.ClientSecret,
+					Endpoint:     vk.Endpoint,
+					Scopes:       s.config.Services.VK.Scopes,
+					RedirectURL:  s.config.Services.RedirectURI,
+				}
+			default:
+				c.Status(http.StatusNotFound)
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"url": config.AuthCodeURL(stateID, oauth2.AccessTypeOnline),
+			})
+		})
+
+		apiGroup.GET("/service-callback", func(c *gin.Context) {
+			client := s.config.OAuth.Clients[0]
+
+			trd := oauth2server.TokenRequestData{
+				ClientID:     client.GetID(),
+				ClientSecret: client.GetSecret(),
+				GrantType:    oauth2server.SocialAuthorizationCode.String(),
+				State:        c.Query("state"),
+				Code:         c.Query("code"),
+				Scope:        c.Query("scope"),
+				ClientIP:     c.ClientIP(),
+			}
+
+			gt, tgr, redirectURI, err := s.oauthServer.ValidationTokenRequest(c, &trd)
+			if err != nil {
+				s.oauthServer.TokenError(c, err)
+				return
+			}
+
+			ti, err := s.oauthServer.GetAccessToken(gt, tgr)
+			if err != nil {
+				s.oauthServer.TokenError(c, err)
+				return
+			}
+
+			td := s.oauthServer.GetTokenData(ti)
+
+			encoded, err := json.Marshal(td)
 			if err != nil {
 				c.String(http.StatusInternalServerError, err.Error())
+				return
 			}
+
+			c.Header("Content-Type", "application/json;charset=UTF-8")
+			c.Header("Cache-Control", "no-store")
+			c.Header("Pragma", "no-cache")
+
+			u, err := url.Parse(redirectURI)
+			if err != nil {
+				c.String(http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			q, err := url.ParseQuery(u.RawQuery)
+			if err != nil {
+				c.String(http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			q.Add("token", string(encoded))
+			u.RawQuery = q.Encode()
+
+			c.Redirect(http.StatusFound, u.String())
 		})
 	}
 
 	s.router = r
+}
+
+func (s *Service) registerUser(userInfo *UserInfo, state *State, timezone string, ip string) (int64, error) {
+
+	stateUserID := state.UserID
+
+	if stateUserID <= 0 {
+		row := s.usersDB.QueryRow("SELECT user_id FROM user_account WHERE service_id = ? AND external_id = ?", state.Service, userInfo.ID)
+
+		err := row.Scan(&stateUserID)
+		if err != nil && err != sql.ErrNoRows {
+			return 0, err
+		}
+	}
+
+	if stateUserID <= 0 {
+
+		res, err := s.usersDB.Exec(`
+			INSERT INTO users (login, e_mail, password, email_to_check, hide_e_mail, email_check_code, name, reg_date, last_online, timezone, last_ip, language) 
+			VALUES (NULL, NULL, '', NULL, 1, NULL, ?, NOW(), NOW(), ?, INET6_ATON(?), ?)
+		`,
+			userInfo.Name,
+			timezone,
+			ip,
+			state.Language,
+		)
+		if err != nil {
+			return 0, err
+		}
+
+		stateUserID, err = res.LastInsertId()
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	if stateUserID <= 0 {
+		return 0, fmt.Errorf("Account not found")
+	}
+
+	_, err := s.usersDB.Exec(`
+		INSERT INTO user_account (service_id, external_id, user_id, used_for_reg, name, link) 
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			user_id = VALUES(user_id),
+			name = VALUES(name),
+			link = VALUES(link)
+	`,
+		state.Service,
+		userInfo.ID,
+		stateUserID,
+		state.UserID == 0,
+		userInfo.Name,
+		userInfo.URL,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	return stateUserID, nil
 }
 
 // ListenHTTP HTTP thread
