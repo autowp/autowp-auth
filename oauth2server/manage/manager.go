@@ -27,7 +27,6 @@ func NewManager() *Manager {
 
 // Manager provide authorization management
 type Manager struct {
-	codeExp        time.Duration
 	gtcfg          map[oauth2server.GrantType]*Config
 	rcfg           *RefreshingConfig
 	accessGenerate oauth2server.AccessGenerate
